@@ -2,6 +2,10 @@ import pandas as pd
 import streamlit as st
 
 
+
+
+
+
 st.set_page_config(
     page_title="Aplikasi Streamlit",
     page_icon="APP",
