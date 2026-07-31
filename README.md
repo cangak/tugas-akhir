@@ -3,38 +3,26 @@
 Template awal aplikasi Streamlit untuk tugas akhir Python.
 
 ## Menjalankan aplikasi
+buka termnal / CMD
+d:\
+cd tugas-akhir-phyton
 
 1. Buat virtual environment:
 
-   ```bash
    python -m venv .venv
-   ```
 
 2. Aktifkan virtual environment:
 
-   Windows PowerShell:
 
-   ```powershell
-   .\.venv\Scripts\Activate.ps1
-   ```
-
-   Command Prompt:
-
-   ```cmd
    .venv\Scripts\activate.bat
-   ```
 
 3. Install dependency:
-
-   ```bash
+//ndak perlu agik. kecuali laptop baru
    pip install -r requirements.txt
-   ```
-
+   
 4. Jalankan Streamlit:
 
-   ```bash
    streamlit run app.py
-   ```
 
 ## Struktur
 
