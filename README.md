@@ -1,40 +1,55 @@
-# Proyek Streamlit
+# Early Warning System Kehadiran Pegawai
 
-Template awal aplikasi Streamlit untuk tugas akhir Python.
+Dashboard Streamlit untuk memantau disiplin kehadiran pegawai, menampilkan status peringatan dini, analisis perilaku kedatangan, dan rekomendasi tindak lanjut administratif.
 
 ## Menjalankan aplikasi
-buka termnal / CMD
-d:\
-cd tugas-akhir-phyton
 
-1. Buat virtual environment:
-
-   python -m venv .venv
-
-2. Aktifkan virtual environment:
-
-
-   .venv\Scripts\activate.bat
-
-3. Install dependency:
-//ndak perlu agik. kecuali laptop baru
-   pip install -r requirements.txt
-   
-4. Jalankan Streamlit:
-
-   streamlit run app.py
-
-## Struktur
-
-```text
-.
-├── app.py
-├── requirements.txt
-├── README.md
-└── .streamlit/
-    └── config.toml
+```powershell
+cd D:\tugas-akhir-phyton
+.\.venv\Scripts\activate
+streamlit run app.py
 ```
 
-## Catatan
+Jika virtual environment belum tersedia, buat dan pasang dependensi terlebih dahulu:
 
-Ubah isi `app.py` untuk menambahkan fitur, membaca dataset, atau membuat halaman dashboard sesuai kebutuhan.
+```powershell
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+## Akun demo
+
+- Username: `admin`
+- Kata sandi: `admin123`
+
+## Fitur
+
+- Sidebar untuk filter periode, unit kerja, serta pencarian pegawai.
+- Indikator EWS berwarna: risiko tinggi, peringatan dini, dan aman.
+- Grafik keterlambatan berdasarkan hari serta distribusi jam kedatangan.
+- Tabel rekomendasi yang diurutkan otomatis dari akumulasi hari tanpa keterangan (TK) tertinggi.
+- Contoh rekomendasi tindak lanjut mengacu pada PP No. 94 Tahun 2021.
+
+## Sumber data ePresensi
+
+Konfigurasi endpoint dilakukan pada layer sumber data tanpa menambahkan komponen
+ke dashboard. Tahun dapat diatur melalui environment variable berikut:
+
+```powershell
+$env:EPRESENSI_TAHUN="2026"
+streamlit run app.py
+```
+
+Daftar pegawai diambil otomatis untuk lima ID `OPD_TARGET`. Endpoint pegawai
+memerlukan autentikasi resmi. Sediakan salah satu kredensial sesi yang sah:
+
+```powershell
+$env:EPRESENSI_BEARER_TOKEN="token-resmi"
+# atau
+$env:EPRESENSI_COOKIE="nama_cookie=nilai_cookie"
+```
+
+Untuk tahap uji, `OPD_AKTIF` berisi tepat 10 OPD. Ganti nama placeholder dengan
+nama OPD yang sama persis seperti pada master pegawai. Sumber aktif dashboard
+adalah ePresensi; data lama tidak menjadi fallback otomatis.

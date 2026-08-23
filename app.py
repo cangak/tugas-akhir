@@ -1,6 +1,11 @@
-import pandas as pd
+import os
+from io import StringIO
+
 import altair as alt
+import pandas as pd
+import requests
 import streamlit as st
+
 
 
 st.set_page_config(
@@ -31,7 +36,7 @@ def logout() -> None:
     st.rerun()
 
 
-def load_employee_data() -> pd.DataFrame:
+def load_legacy_employee_data() -> pd.DataFrame:
     """Data contoh absensi yang bisa diganti dengan sumber data instansi."""
     data = pd.DataFrame(
         [
@@ -64,6 +69,220 @@ def load_employee_data() -> pd.DataFrame:
     data["Jabatan"] = "Pelaksana"
     data["Pangkat/Golongan"] = "III/a"
     return data
+
+
+MONTH_NAMES = {
+    "01": "Januari", "02": "Februari", "03": "Maret", "04": "April",
+    "05": "Mei", "06": "Juni", "07": "Juli", "08": "Agustus",
+    "09": "September", "10": "Oktober", "11": "November", "12": "Desember",
+}
+
+# Batasi ruang uji ke tepat 10 OPD. Ganti nama placeholder dengan nama OPD resmi
+# setelah master pegawai sebenarnya tersedia.
+OPD_AKTIF = [
+    "Administrasi",
+    "Keuangan",
+    "DINAS KOMUNIKASI DAN INFORMATIKA PROV KALBAR",
+    "OPD 4",
+    "OPD 5",
+    "OPD 6",
+    "OPD 7",
+    "OPD 8",
+    "OPD 9",
+    "OPD 10",
+]
+
+class EPresensiAccessError(RuntimeError):
+    """Kegagalan akses endpoint yang perlu diketahui pengguna."""
+
+
+def ambil_presensi_pegawai(bulan, tahun, nip) -> pd.DataFrame:
+    """Mengambil rekap harian tanpa cache selama fase debugging integrasi."""
+    bulan = str(bulan).zfill(2)
+    tahun = str(tahun)
+    nip = str(nip).strip()
+    url = f"https://epresensi.kalbarprov.go.id/rekapsemua/{bulan}/{tahun}/{nip}"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "text/html,application/xhtml+xml,application/json",
+    }
+
+    with requests.Session() as session:
+        response = session.get(url, headers=headers, timeout=30)
+
+    if response.status_code == 403:
+        raise EPresensiAccessError(
+            "Endpoint ePresensi mengembalikan status 403. Server mungkin memerlukan "
+            "header, cookie sesi browser, atau mekanisme resmi lainnya. Tidak ada "
+            "upaya melewati autentikasi atau proteksi server."
+        )
+    response.raise_for_status()
+
+    content_type = response.headers.get("Content-Type", "").lower()
+    if "application/json" in content_type:
+        payload = response.json()
+        if isinstance(payload, dict):
+            payload = payload.get("data", payload)
+        raw = pd.json_normalize(payload) if payload else pd.DataFrame()
+    else:
+        try:
+            tables = pd.read_html(StringIO(response.text))
+        except ValueError:
+            return pd.DataFrame()
+        raw = tables[0] if tables else pd.DataFrame()
+
+    if raw.empty:
+        return pd.DataFrame()
+
+    arrival = pd.to_datetime(raw.get("datang.datang"), errors="coerce")
+    departure = pd.to_datetime(raw.get("pulang.pulang"), errors="coerce")
+    shift_date = pd.to_datetime(raw.get("data_shift.jam_datang"), errors="coerce")
+    result = pd.DataFrame(index=raw.index)
+    result["NIP"] = raw.get("NIP", str(nip)).astype(str) if "NIP" in raw else str(nip)
+    result["Nama"] = raw.get("nama", "-")
+    result["OPD"] = raw.get("opd", "-")
+    result["Tanggal"] = arrival.fillna(shift_date).dt.date
+    result["Jam Masuk"] = arrival
+    result["Jam Pulang"] = departure
+    result["Status"] = raw.get("datang.sumber", "-")
+    result["Keterlambatan"] = raw.get("datang.telat", "00:00")
+    result["Hari"] = raw.get("hari", "-")
+    return result.reset_index(drop=True)
+
+
+# Nama fungsi pada integrasi awal tetap tersedia untuk kompatibilitas.
+ambil_data_presensi = ambil_presensi_pegawai
+
+
+def ambil_presensi_10_opd(
+    bulan, tahun, df_pegawai: pd.DataFrame
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Mengambil presensi master pegawai pada OPD_AKTIF secara berurutan."""
+    required = {"NIP", "Nama", "OPD"}
+    missing = required.difference(df_pegawai.columns)
+    if missing:
+        raise ValueError(f"Kolom master pegawai belum lengkap: {', '.join(sorted(missing))}")
+
+    pegawai_aktif = (
+        df_pegawai[df_pegawai["OPD"].isin(OPD_AKTIF) | df_pegawai["OPD"].fillna("").eq("")]
+        .dropna(subset=["NIP"])
+        .drop_duplicates("NIP")
+    )
+    semua_data = []
+    gagal = []
+    endpoint_urls = []
+    for row in pegawai_aktif.itertuples(index=False):
+        endpoint_urls.append(
+            f"https://epresensi.kalbarprov.go.id/rekapsemua/"
+            f"{str(bulan).zfill(2)}/{tahun}/{str(row.NIP)}"
+        )
+        try:
+            presensi = ambil_presensi_pegawai(bulan, tahun, str(row.NIP))
+            if presensi.empty:
+                raise ValueError("Data presensi kosong")
+            presensi = presensi.copy()
+            api_nama = str(presensi["Nama"].iloc[0])
+            api_opd = str(presensi["OPD"].iloc[0])
+            if api_opd not in OPD_AKTIF:
+                raise ValueError(f"OPD dari API tidak termasuk OPD_AKTIF: {api_opd}")
+            presensi["NIP"] = str(row.NIP)
+            presensi["Nama"] = row.Nama if str(row.Nama).strip() else api_nama
+            presensi["OPD"] = row.OPD if str(row.OPD).strip() else api_opd
+            semua_data.append(presensi)
+        except Exception as exc:
+            gagal.append({
+                "nip": str(row.NIP), "nama": row.Nama,
+                "opd": row.OPD, "error": str(exc),
+            })
+
+    df_presensi = (
+        pd.concat(semua_data, ignore_index=True)
+        if semua_data else pd.DataFrame(columns=[
+            "NIP", "Nama", "OPD", "Tanggal", "Jam Masuk", "Jam Pulang",
+            "Status", "Keterlambatan", "Hari",
+        ])
+    )
+    df_presensi.attrs["endpoint_urls"] = endpoint_urls
+    return df_presensi, gagal
+
+
+def _duration_is_late(value) -> bool:
+    if pd.isna(value):
+        return False
+    parts = str(value).strip().split(":")
+    try:
+        return any(int(float(part)) > 0 for part in parts)
+    except ValueError:
+        return False
+
+
+def _epresensi_to_dashboard(raw: pd.DataFrame, bulan: str, nip: str) -> pd.DataFrame:
+    """Menyesuaikan hasil ePresensi dengan kontrak kolom dashboard lama."""
+    if raw.empty:
+        return pd.DataFrame()
+
+    source = raw.get("Status", pd.Series("", index=raw.index)).fillna("").astype(str).str.upper()
+    arrival = pd.to_datetime(raw.get("Jam Masuk"), errors="coerce")
+    late = raw.get("Keterlambatan", pd.Series("00:00", index=raw.index)).map(_duration_is_late)
+    day_map = {"Sen": "Senin", "Sel": "Selasa", "Rab": "Rabu", "Kam": "Kamis", "Jum": "Jumat"}
+    days = raw.get("Hari", pd.Series("", index=raw.index)).map(day_map).fillna("-")
+    late_days = days[late]
+    dominant_day = late_days.mode().iloc[0] if not late_days.empty else "-"
+
+    is_wfh = source.str.contains("WFH", na=False)
+    is_dl = source.str.contains(r"DINAS LUAR|\bDL\b", regex=True, na=False)
+    is_leave = source.str.contains(r"CUTI|IZIN|SAKIT", regex=True, na=False)
+    is_tk = source.str.contains(r"TANPA KETERANGAN|\bTK\b", regex=True, na=False) | (
+        arrival.isna() & ~(is_wfh | is_dl | is_leave)
+    )
+    actual_arrival = arrival[~(is_wfh | is_dl | is_leave | is_tk)]
+    average_arrival = (
+        actual_arrival.dt.hour.add(actual_arrival.dt.minute.div(60)).mean()
+        if not actual_arrival.empty else 0.0
+    )
+
+    first = raw.iloc[0]
+    record = {
+        "NIP": str(first.get("NIP", nip)),
+        "Nama Pegawai": str(first.get("Nama", "-")),
+        "Unit Kerja": str(first.get("OPD", "-")),
+        "Bulan": MONTH_NAMES[str(bulan).zfill(2)],
+        "TK": int(is_tk.sum()),
+        "Cuti": int(is_leave.sum()),
+        "Terlambat": int(late.sum()),
+        "Hari Kerja": int(len(raw)),
+        "Jam Datang": round(float(average_arrival), 2),
+        "Hari Dominan": dominant_day,
+        "WFH": int(is_wfh.sum()),
+        "DL": int(is_dl.sum()),
+        "Jabatan": "-",
+        "Pangkat/Golongan": "-",
+    }
+    return pd.DataFrame([record])
+
+
+def _master_pegawai_lama() -> pd.DataFrame:
+    master = load_legacy_employee_data()[["NIP", "Nama Pegawai", "Unit Kerja"]].copy()
+    return master.rename(columns={"Nama Pegawai": "Nama", "Unit Kerja": "OPD"}).drop_duplicates("NIP")
+
+
+def _master_pegawai_aktif() -> pd.DataFrame:
+    """Memakai NIP input pengguna tanpa kembali ke master simulasi."""
+    input_nips = st.session_state.get("epresensi_nips", "")
+    nips = [nip.strip() for nip in input_nips.replace("\n", ",").split(",") if nip.strip()]
+    if nips:
+        return pd.DataFrame({"NIP": nips, "Nama": "", "OPD": ""}).drop_duplicates("NIP")
+    return pd.DataFrame(columns=["NIP", "Nama", "OPD"])
+
+
+def load_employee_data() -> pd.DataFrame:
+    """Menggunakan kembali sumber data dashboard sebelum integrasi API."""
+    return load_legacy_employee_data()
+
+
+def available_months(data: pd.DataFrame) -> list[str]:
+    present = set(data["Bulan"].dropna().astype(str))
+    return [name for name in MONTH_NAMES.values() if name in present]
 
 
 def classify_ews(tk: int) -> tuple[str, str]:
