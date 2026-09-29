@@ -1,0 +1,22 @@
+{
+  "fingerprint": {
+    "path": "data\\dokumen_resmi\\2026\\SE_Cuti_Bersama_2026.pdf",
+    "modified_time_ns": 1788703369872531900,
+    "size": 1056688
+  },
+  "document": "SE_Cuti_Bersama_2026.pdf",
+  "page_count": 4,
+  "text_length": 0,
+  "has_text_layer": false,
+  "ocr_used": true,
+  "ocr_engine": "Tesseract OCR via pytesseract",
+  "libur_nasional_count": 8,
+  "cuti_bersama_count": 3,
+  "unresolved_calendar_rows": [],
+  "unresolved_count": 0,
+  "duplicate_count": 0,
+  "conflict_count": 0,
+  "candidate_rejected": true,
+  "candidate_count": 11,
+  "retained_calendar_count": 25
+}

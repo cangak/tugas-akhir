@@ -1,6 +1,6 @@
-# Early Warning System Kehadiran Pegawai
+# Early Warning System Presensi
 
-Dashboard Streamlit untuk memantau disiplin kehadiran pegawai, menampilkan status peringatan dini, analisis perilaku kedatangan, dan rekomendasi tindak lanjut administratif.
+Dashboard Streamlit untuk monitoring kepatuhan presensi, Early Warning System (EWS), verifikasi tindak lanjut, dan laporan TK.
 
 ## Menjalankan aplikasi
 
@@ -10,46 +10,56 @@ cd D:\tugas-akhir-phyton
 streamlit run app.py
 ```
 
-Jika virtual environment belum tersedia, buat dan pasang dependensi terlebih dahulu:
+Akun demo: `admin` / `admin123`.
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
+## Sumber data
+
+Sumber aktif default adalah file Excel rekap presensi di folder `data/`. Semua halaman memakai bentuk data harian canonical yang sama sehingga dashboard, EWS, dan laporan TK tidak menghitung dari sumber berbeda.
+
+```env
+DATA_SOURCE=excel
+ALLOW_EXCEL_FALLBACK=false
 ```
 
-## Akun demo
+PostgreSQL merupakan backend opsional. Aktifkan secara eksplisit:
 
-- Username: `admin`
-- Kata sandi: `admin123`
-
-## Fitur
-
-- Sidebar untuk filter periode, unit kerja, serta pencarian pegawai.
-- Indikator EWS berwarna: risiko tinggi, peringatan dini, dan aman.
-- Grafik keterlambatan berdasarkan hari serta distribusi jam kedatangan.
-- Tabel rekomendasi yang diurutkan otomatis dari akumulasi hari tanpa keterangan (TK) tertinggi.
-- Contoh rekomendasi tindak lanjut mengacu pada PP No. 94 Tahun 2021.
-
-## Sumber data ePresensi
-
-Konfigurasi endpoint dilakukan pada layer sumber data tanpa menambahkan komponen
-ke dashboard. Tahun dapat diatur melalui environment variable berikut:
-
-```powershell
-$env:EPRESENSI_TAHUN="2026"
-streamlit run app.py
+```env
+DATA_SOURCE=postgres
+DATABASE_URL=postgresql+psycopg2://USER:PASSWORD@localhost:5432/presensi_db
+ALLOW_EXCEL_FALLBACK=false
 ```
 
-Daftar pegawai diambil otomatis untuk lima ID `OPD_TARGET`. Endpoint pegawai
-memerlukan autentikasi resmi. Sediakan salah satu kredensial sesi yang sah:
+Jika koneksi PostgreSQL gagal, aplikasi tidak berpindah diam-diam ke Excel. Fallback hanya terjadi bila `ALLOW_EXCEL_FALLBACK=true`.
+
+ETL PostgreSQL dijalankan terpisah dan tidak dijalankan pada setiap rerun Streamlit:
 
 ```powershell
-$env:EPRESENSI_BEARER_TOKEN="token-resmi"
-# atau
-$env:EPRESENSI_COOKIE="nama_cookie=nilai_cookie"
+python -m etl.presensi_etl
 ```
 
-Untuk tahap uji, `OPD_AKTIF` berisi tepat 10 OPD. Ganti nama placeholder dengan
-nama OPD yang sama persis seperti pada master pegawai. Sumber aktif dashboard
-adalah ePresensi; data lama tidak menjadi fallback otomatis.
+ETL menggunakan UPSERT dengan identitas unik NIP + tanggal. Modul ePresensi masih bersifat eksperimental/future development dan bukan sumber aktif default.
+
+## Logika analitik
+
+KPI organisasi adalah **Tingkat Kepatuhan Presensi**:
+
+```text
+(Hari Kerja - TK) / Hari Kerja × 100%
+```
+
+Cuti, WFH, dan DL merupakan kondisi sah sehingga tidak mengurangi kepatuhan.
+
+Status EWS berasal dari `modules.analytics`:
+
+- TK 0: Normal
+- TK 1–2: Perlu Perhatian
+- TK 3–5: Perlu Verifikasi
+- TK ≥6: Prioritas Tindak Lanjut
+
+Keterlambatan merupakan indikator tambahan dan tidak menentukan status EWS. PP 94/2021 hanya dipetakan untuk PNS setelah hari tanpa alasan sah diverifikasi di Action Center; hasil sistem merupakan indikasi pendukung, bukan keputusan hukuman.
+
+## Pengujian
+
+```powershell
+python -m pytest -q
+```
