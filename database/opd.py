@@ -12,13 +12,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
-LOGGER = logging.getLogger(__name__)
+from database.schema import metadata
 
-opd_metadata = MetaData()
+LOGGER = logging.getLogger(__name__)
 
 opd_table = Table(
     "opd",
-    opd_metadata,
+    metadata,
     Column("id", BigInteger, primary_key=True, autoincrement=True),
     Column("kode", String(50), nullable=True, unique=True),
     Column("kode_sipd", String(50), nullable=True),
@@ -149,7 +149,7 @@ DEFAULT_SEEDED_OPDS = [
 
 def init_opd_schema(engine: Engine) -> None:
     """Buat tabel opd jika belum ada."""
-    opd_metadata.create_all(engine)
+    metadata.create_all(engine)
 
 
 def seed_default_opds(engine: Engine) -> list[str]:

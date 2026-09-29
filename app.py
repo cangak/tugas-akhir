@@ -59,9 +59,10 @@ from modules.attendance_indicators import prepare_daily_indicators, summarize_at
 from modules.display import format_percentage_exact, safe_display
 from modules.user_management import show_user_management_page
 from modules.opd_management import show_opd_management_page
+from modules.pegawai_management import show_pegawai_management_page
+from modules.presensi_data_management import show_presensi_data_page
 
 LOGGER = logging.getLogger(__name__)
-
 
 st.set_page_config(
     page_title="EWS Kehadiran Pegawai",
@@ -5948,9 +5949,11 @@ with st.sidebar:
         "📄 Laporan Ketidakhadiran": "Laporan Ketidakhadiran",
         "📅 Master Kalender Kerja": "Master Kalender Kerja",
         "🏛️ Master OPD / Dinas": "Master OPD",
+        "👥 Master Data Pegawai": "Master Pegawai",
+        "📋 Data Presensi & Periode": "Data Presensi",
         "✅ Action Center": "Action Center",
         "🕒 Audit Trail": "Audit Trail",
-        "👥 Manajemen Pengguna": "Manajemen Pengguna",
+        "🔐 Manajemen Pengguna": "Manajemen Pengguna",
     }
     if navigation_target:
         navigation_target = next((label for label, value in page_options.items() if value == navigation_target), navigation_target)
@@ -5979,6 +5982,10 @@ elif selected_page == "Master Kalender Kerja":
     show_work_calendar_page()
 elif selected_page == "Master OPD":
     show_opd_management_page(get_engine())
+elif selected_page == "Master Pegawai":
+    show_pegawai_management_page(get_engine())
+elif selected_page == "Data Presensi":
+    show_presensi_data_page(get_engine())
 elif selected_page == "Action Center":
     show_action_center_page_focus()
 elif selected_page == "Manajemen Pengguna":

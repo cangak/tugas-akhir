@@ -14,7 +14,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import Engine
 
 
-metadata = MetaData()
+from database.schema import metadata
+
 presensi_harian = Table(
     "presensi_harian",
     metadata,
@@ -46,6 +47,12 @@ def create_schema(engine: Engine) -> None:
     init_auth_schema(engine)
     from database.opd import init_opd_schema
     init_opd_schema(engine)
+    from database.pegawai import init_pegawai_schema
+    init_pegawai_schema(engine)
+    from database.periode import init_periode_schema
+    init_periode_schema(engine)
+    from database.presensi import init_presensi_schema
+    init_presensi_schema(engine)
 
 
 def _time_or_none(value: object) -> time | None:

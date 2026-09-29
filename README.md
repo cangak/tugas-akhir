@@ -60,6 +60,22 @@ Aplikasi dilengkapi dengan modul **Master Organisasi Perangkat Daerah (OPD / Din
 - `alamat`, `telepon`, `email`, `website`, `kepala_nama`, `kepala_nip`
 - `aktif`, `created_at`, `updated_at`, `deleted_at` (soft delete & restore)
 
+### 👥 Modul Master Data Pegawai & Import Excel
+Aplikasi dilengkapi dengan modul **Master Data Pegawai** (`modules/pegawai_management.py`) yang menyimpan data ke tabel `pegawai` di PostgreSQL dengan struktur:
+- `id_pegawai`, `nip`, `nama_pegawai`, `id_opd` (Foreign Key ke `opd.id`)
+- `jabatan`, `jenis_kelamin`, `status_pegawai` (`PNS`, `PPPK`, `NON-ASN`, dll.)
+- `aktif`, `created_at`, `updated_at`, `deleted_at`
+- **Fitur Import Excel**: Unduh template Excel contoh, upload spreadsheet `.xlsx`/`.csv`, dan sistem otomatis melakukan sinkronisasi/UPSERT berbasis NIP ke PostgreSQL.
+
+### 📋 Modul Data Presensi & Master Periode
+Aplikasi dilengkapi dengan modul **Data Presensi & Master Periode** (`modules/presensi_data_management.py`) yang menyimpan data ke tabel PostgreSQL:
+- **Tabel `periode`**:
+  - `id_periode`, `bulan`, `tahun`, `tanggal_mulai`, `tanggal_selesai`, `keterangan`
+- **Tabel `presensi`**:
+  - `id_presensi`, `id_pegawai` (FK ke `pegawai.id_pegawai`), `id_periode` (FK ke `periode.id_periode`)
+  - `tanggal_presensi`, `jam_masuk`, `jam_pulang`, `status_presensi`
+  - `keterlambatan_menit`, `sumber_data`, `waktu_insert`, `waktu_update`
+
 ---
 
 ## 📊 Konfigurasi Sumber Data
