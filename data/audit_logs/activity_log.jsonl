@@ -26,3 +26,4 @@
 {"timestamp": "2026-09-29T18:01:10+07:00", "event_type": "auth", "title": "User Login", "description": "Pengguna 'admin' (admin) berhasil login via PostgreSQL.", "metadata": {"username": "admin", "role": "admin"}}
 {"timestamp": "2026-09-30T08:31:37+07:00", "event_type": "auth", "title": "User Login", "description": "Pengguna 'admin' (admin) berhasil login via PostgreSQL.", "metadata": {"username": "admin", "role": "admin"}}
 {"timestamp": "2026-09-30T09:14:53+07:00", "event_type": "presensi_management", "title": "Sinkronisasi Presensi", "description": "User 'admin' melakukan sinkronisasi 138177 record presensi ke PostgreSQL.", "metadata": {"result": {"processed": 138177, "inserted": 138177, "updated": 0, "rejected": 0}}}
+{"timestamp": "2026-09-30T09:29:41+07:00", "event_type": "auth", "title": "User Login", "description": "Pengguna 'admin' (admin) berhasil login via PostgreSQL.", "metadata": {"username": "admin", "role": "admin"}}
