@@ -71,24 +71,64 @@ def save_presensi_dataframe_to_db(frame: pd.DataFrame, engine: Engine) -> dict[s
 
     # Pre-fetch pegawai lookup map by NIP
     with engine.connect() as conn:
-        peg_rows = conn.execute(select(pegawai_table.c.id_pegawai, pegawai_table.c.nip, pegawai_table.c.id_opd)).all()
+        peg_rows = conn.execute(select(pegawai_table.c.id_pegawai, pegawai_table.c.nip)).all()
         pegawai_map: dict[str, int] = {str(r.nip).strip(): r.id_pegawai for r in peg_rows}
 
-    # Pre-fetch OPD lookup
+    # Pre-fetch OPD lookup (nama, singkatan, kode)
     opds = list_opds(engine, include_deleted=True)
-    opd_lookup: dict[str, int] = {o["nama"].strip().lower(): o["id"] for o in opds if o.get("nama")}
-
-    # Periode cache
-    periode_cache: dict[tuple[int, int], int] = {}
-
-    records_to_upsert: list[dict[str, Any]] = []
-    rejected_count = 0
+    opd_lookup: dict[str, int] = {}
+    for o in opds:
+        if o.get("nama"):
+            opd_lookup[str(o["nama"]).strip().lower()] = o["id"]
+        if o.get("singkatan"):
+            opd_lookup[str(o["singkatan"]).strip().lower()] = o["id"]
+        if o.get("kode"):
+            opd_lookup[str(o["kode"]).strip().lower()] = o["id"]
 
     work = frame.copy()
     dates = pd.to_datetime(work.get("Tanggal", work.get("tanggal_presensi")), errors="coerce")
     work["_parsed_date"] = dates
 
-    for idx, row in work.iterrows():
+    # Identifikasi pegawai baru yang perlu di-register sekaligus
+    new_pegawai_dict: dict[str, dict[str, Any]] = {}
+    for _, row in work.iterrows():
+        raw_nip = str(row.get("NIP", row.get("nip", ""))).strip().replace(" ", "").replace("-", "")
+        if not raw_nip or raw_nip.lower() in {"nan", "none", ""}:
+            continue
+        if raw_nip not in pegawai_map and raw_nip not in new_pegawai_dict:
+            raw_nama = str(row.get("Nama", row.get("nama_pegawai", raw_nip))).strip() or raw_nip
+            raw_opd_name = str(row.get("Unit Kerja", row.get("OPD", ""))).strip()
+            id_opd_val = opd_lookup.get(raw_opd_name.lower()) if raw_opd_name else None
+            new_pegawai_dict[raw_nip] = {
+                "nip": raw_nip,
+                "nama_pegawai": raw_nama,
+                "id_opd": id_opd_val,
+                "jabatan": "Pelaksana",
+                "jenis_kelamin": "Laki-laki",
+                "status_pegawai": "PNS",
+                "aktif": True,
+            }
+
+    if new_pegawai_dict:
+        with engine.begin() as conn:
+            stmt_peg = pg_insert(pegawai_table).values(list(new_pegawai_dict.values()))
+            conn.execute(stmt_peg.on_conflict_do_nothing(constraint="uq_pegawai_nip"))
+            peg_rows = conn.execute(select(pegawai_table.c.id_pegawai, pegawai_table.c.nip)).all()
+            pegawai_map = {str(r.nip).strip(): r.id_pegawai for r in peg_rows}
+
+    # Pre-populate Periode Cache
+    periode_cache: dict[tuple[int, int], int] = {}
+    unique_periods = work[["_parsed_date"]].dropna().copy()
+    for _, prow in unique_periods.iterrows():
+        pdate = prow["_parsed_date"]
+        pyear, pmonth = int(pdate.year), int(pdate.month)
+        if (pmonth, pyear) not in periode_cache:
+            periode_cache[(pmonth, pyear)] = get_or_create_periode(engine, pmonth, pyear)
+
+    records_to_upsert: list[dict[str, Any]] = []
+    rejected_count = 0
+
+    for _, row in work.iterrows():
         tgl = row["_parsed_date"]
         if pd.isna(tgl):
             rejected_count += 1
@@ -99,45 +139,17 @@ def save_presensi_dataframe_to_db(frame: pd.DataFrame, engine: Engine) -> dict[s
             rejected_count += 1
             continue
 
-        # Dapatkan / Daftarkan pegawai otomatis jika belum ada di database
         id_pegawai = pegawai_map.get(raw_nip)
         if id_pegawai is None:
-            raw_nama = str(row.get("Nama", row.get("nama_pegawai", raw_nip))).strip() or raw_nip
-            raw_opd_name = str(row.get("Unit Kerja", row.get("OPD", ""))).strip()
-            id_opd_val = opd_lookup.get(raw_opd_name.lower()) if raw_opd_name else None
+            rejected_count += 1
+            continue
 
-            with engine.begin() as conn:
-                chk = select(pegawai_table.c.id_pegawai).where(pegawai_table.c.nip == raw_nip)
-                ex_id = conn.execute(chk).scalar_one_or_none()
-                if ex_id is not None:
-                    id_pegawai = ex_id
-                else:
-                    res = conn.execute(
-                        pegawai_table.insert().values(
-                            nip=raw_nip,
-                            nama_pegawai=raw_nama,
-                            id_opd=id_opd_val,
-                            jabatan="Pelaksana",
-                            jenis_kelamin="Laki-laki",
-                            status_pegawai="PNS",
-                            aktif=True,
-                        )
-                    )
-                    id_pegawai = res.inserted_primary_key[0]
-                pegawai_map[raw_nip] = id_pegawai
-
-        # Dapatkan / Daftarkan ID periode
         year = int(tgl.year)
         month = int(tgl.month)
-        if (month, year) not in periode_cache:
-            periode_cache[(month, year)] = get_or_create_periode(engine, month, year)
-        id_periode = periode_cache[(month, year)]
+        id_periode = periode_cache.get((month, year))
 
-        # Waktu masuk & pulang
         jam_masuk_val = _parse_time(row.get("Jam_Masuk", row.get("jam_masuk")))
         jam_pulang_val = _parse_time(row.get("Jam_Pulang", row.get("jam_pulang")))
-
-        # Status & Keterlambatan
         status_val = str(row.get("Status", row.get("status_presensi", "Hadir"))).strip()
         late_val = int(pd.to_numeric(row.get("Menit_Terlambat", row.get("keterlambatan_menit", 0)), errors="coerce") or 0)
         sumber_val = str(row.get("Sumber_File", row.get("sumber_data", "PostgreSQL"))).strip() or "PostgreSQL"
@@ -156,41 +168,36 @@ def save_presensi_dataframe_to_db(frame: pd.DataFrame, engine: Engine) -> dict[s
     if not records_to_upsert:
         return {"processed": len(frame), "inserted": 0, "updated": 0, "rejected": rejected_count}
 
-    # Eksekusi UPSERT
-    inserted_count = 0
-    updated_count = 0
+    # Deduplikasi dalam batch sebelum batch insert PostgreSQL
+    unique_dict: dict[tuple[int, Any], dict[str, Any]] = {}
+    for r in records_to_upsert:
+        unique_dict[(r["id_pegawai"], r["tanggal_presensi"])] = r
+    deduped_records = list(unique_dict.values())
 
+    # Eksekusi Batch UPSERT ke PostgreSQL dalam chunks
+    chunk_size = 1000
     with engine.begin() as conn:
-        for rec in records_to_upsert:
-            stmt = select(presensi_table.c.id_presensi).where(
-                presensi_table.c.id_pegawai == rec["id_pegawai"],
-                presensi_table.c.tanggal_presensi == rec["tanggal_presensi"],
+        for i in range(0, len(deduped_records), chunk_size):
+            chunk = deduped_records[i : i + chunk_size]
+            stmt = pg_insert(presensi_table).values(chunk)
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_presensi_pegawai_tanggal",
+                set_={
+                    "id_periode": stmt.excluded.id_periode,
+                    "jam_masuk": stmt.excluded.jam_masuk,
+                    "jam_pulang": stmt.excluded.jam_pulang,
+                    "status_presensi": stmt.excluded.status_presensi,
+                    "keterlambatan_menit": stmt.excluded.keterlambatan_menit,
+                    "sumber_data": stmt.excluded.sumber_data,
+                    "waktu_update": func.now(),
+                },
             )
-            existing = conn.execute(stmt).scalar_one_or_none()
-
-            if existing is not None:
-                conn.execute(
-                    update(presensi_table)
-                    .where(presensi_table.c.id_presensi == existing)
-                    .values(
-                        id_periode=rec["id_periode"],
-                        jam_masuk=rec["jam_masuk"],
-                        jam_pulang=rec["jam_pulang"],
-                        status_presensi=rec["status_presensi"],
-                        keterlambatan_menit=rec["keterlambatan_menit"],
-                        sumber_data=rec["sumber_data"],
-                        waktu_update=func.now(),
-                    )
-                )
-                updated_count += 1
-            else:
-                conn.execute(presensi_table.insert().values(**rec))
-                inserted_count += 1
+            conn.execute(stmt)
 
     return {
         "processed": len(frame),
-        "inserted": inserted_count,
-        "updated": updated_count,
+        "inserted": len(deduped_records),
+        "updated": 0,
         "rejected": rejected_count,
     }
 

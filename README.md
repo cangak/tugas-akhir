@@ -30,7 +30,8 @@ Setelah seluruh container berjalan:
 | **Melihat Log Database** | `docker compose logs -f db` |
 | **Menghentikan Layanan** | `docker compose down` |
 | **Restart Layanan** | `docker compose restart` |
-| **Inisialisasi / Seed User Manual** | `docker compose exec web python -m database.seed_users` |
+| **Migrasi Skema & Seed Seluruh Data** | `docker compose exec web python -m database.migrate_and_seed` |
+| **Inisialisasi / Seed User Saja** | `docker compose exec web python -m database.seed_users` |
 | **Menjalankan ETL Presensi ke PostgreSQL** | `docker compose exec web python -m etl.presensi_etl` |
 | **Menjalankan Unit Test** | `docker compose exec web pytest -q` |
 
@@ -78,14 +79,45 @@ Aplikasi dilengkapi dengan modul **Data Presensi & Master Periode** (`modules/pr
 
 ---
 
-## 📊 Konfigurasi Sumber Data
+## 🔄 Migrasi Skema & Seeding Data PostgreSQL
 
-Secara default di Docker, variabel lingkungan di `docker-compose.yml` mengarah langsung ke database PostgreSQL:
+Aplikasi menyediakan script master migrasi dan seed terintegrasi ([database/migrate_and_seed.py](file:///Users/pakdik/www/tugas-akhir-aida/database/migrate_and_seed.py)) yang bersifat **idempotent** (aman dijalankan berulang kali).
 
-```yaml
-environment:
-  - DATABASE_URL=postgresql://myuser:mysecretpassword@db:5432/mydb
+Ketika developer lain melakukan `git pull` atau menjalankan container untuk pertama kali, cukup jalankan:
+
+```bash
+docker compose exec web python -m database.migrate_and_seed
 ```
+
+### Apa yang Dilakukan Script Ini?
+1. **Membuat Seluruh Skema Tabel**: `users`, `opd`, `pegawai`, `periode`, `presensi`, dan `presensi_harian`.
+2. **Seed Akun Pengguna Default**: `admin`, `operator`, dan `pimpinan`.
+3. **Seed Master OPD / Dinas**: 11 OPD lengkap (BAPPEDA, BKAD, BKD, DISKOMINFO, INSPEKTORAT, ROHUKUM, ROORGANISASI, BKPSDM, DISDIK, DINKES, SETDA).
+4. **Seed Master Periode**: 12 Periode Bulanan Tahun 2026 (Januari s/d Desember).
+5. **Migrasi Master Pegawai**: Otomatis mengekstrak seluruh pegawai unik dari 56 file Excel presensi di folder `data/` dan menghubungkannya dengan OPD masing-masing.
+6. **Migrasi Riwayat Presensi**: Menyinkronkan seluruh puluhan ribu baris riwayat presensi ke tabel `presensi_harian` dan tabel relasional `presensi`.
+
+---
+
+## 📊 Konfigurasi Environment Variable (`.env`)
+
+Pengaturan database PostgreSQL dan aplikasi dapat dikustomisasi langsung melalui file [`.env`](file:///.env) (disalin dari [`.env.example`](file:///.env.example)):
+
+```dotenv
+# Kredensial Database PostgreSQL
+POSTGRES_USER=myuser
+POSTGRES_PASSWORD=mysecretpassword
+POSTGRES_DB=mydb
+POSTGRES_PORT=5432
+
+# Port Web Dashboard Streamlit
+WEB_PORT=8501
+
+# URL Koneksi PostgreSQL
+DATABASE_URL=postgresql://myuser:mysecretpassword@db:5432/mydb
+```
+
+Variabel di atas otomatis dibaca oleh `docker-compose.yml` maupun modul Python via `python-dotenv`.
 
 - **Sinkronisasi Data Excel ke DB**: Untuk mengisi/memperbarui data presensi dari file Excel di `data/` ke database PostgreSQL, jalankan:
   ```bash
